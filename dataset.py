@@ -7,7 +7,6 @@ from PIL import Image
 
 
 class GTSRB(Dataset):
-    base_folder = "GTSRB"
 
     def __init__(self, root_dir, train=False, transform=None):
         """
@@ -19,12 +18,10 @@ class GTSRB(Dataset):
         """
         self.root_dir = root_dir
 
-        self.sub_directory = "trainingset" if train else "testset"
-        self.csv_file_name = "training.csv" if train else "test.csv"
+        self.sub_directory = "Train" if train else "Test"
+        self.csv_file_name = "Train.csv" if train else "Test.csv"
 
-        csv_file_path = os.path.join(
-            root_dir, self.base_folder, self.sub_directory, self.csv_file_name
-        )
+        csv_file_path = os.path.join(root_dir, self.csv_file_name)
 
         self.csv_data = pd.read_csv(csv_file_path)
 
@@ -36,13 +33,11 @@ class GTSRB(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(
             self.root_dir,
-            self.base_folder,
-            self.sub_directory,
-            self.csv_data.iloc[idx, 0],
+            self.csv_data.iloc[idx, -1],
         )
         img = Image.open(img_path)
 
-        classId = self.csv_data.iloc[idx, 1]
+        classId = self.csv_data.iloc[idx, -2]
 
         if self.transform is not None:
             img = self.transform(img)
