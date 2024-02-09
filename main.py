@@ -136,3 +136,43 @@ axs[1].set_title("Plot - Accuracy")
 axs[1].set_xlabel("Epochs")
 axs[1].set_ylabel("Accuracy")
 legend = axs[1].legend(loc="center right", shadow=True)
+
+
+# print(os.listdir('/kaggle/input/gtsrb-german-traffic-sign'))
+Model_path = "/kaggle/working/pytorch_classification_resnet50.pth"
+model = CustomResNet50(num_classes)
+model.load_state_dict(torch.load(Model_path))
+model = model.to(device)
+
+# Perform classification
+
+y_pred_list = []
+corr_classified = 0
+
+with torch.no_grad():
+    model.eval()
+
+    i = 0
+
+    for image, _ in test_loader:
+        image = image.to(device)
+
+        y_test_pred = model(image)
+
+        y_pred_softmax = torch.log_softmax(y_test_pred[0], dim=1)
+        _, y_pred_tags = torch.max(y_pred_softmax, dim=1)
+        y_pred_tags = y_pred_tags.cpu().numpy()
+
+        y_pred = y_pred_tags[0]
+        y_pred = labels[y_pred]
+
+        y_pred_list.append(y_pred)
+
+        if labels_list[i] == y_pred:
+            corr_classified += 1
+
+        i += 1
+
+print("Number of correctly classified images = %d" % corr_classified)
+print("Number of incorrectly classified images = %d" % (numExamples - corr_classified))
+print("Final accuracy = %f" % (corr_classified / numExamples))
