@@ -1,21 +1,20 @@
 import pandas as pd
-import dataset
 import torch
+import numpy as np
 import os
-from models import CustomResNet50
-from evaluation import evaluate
-import torchvision
 from torchvision import transforms
 import torch.utils.data as data
 import torch.optim as optim
 import torch.nn as nn
-from torchsummary import summary
 import time
-import numpy as np
 from torch.utils.data import random_split, DataLoader
 import matplotlib.pyplot as plt
+from torch.optim.lr_scheduler import StepLR
 
 from train import train
+from evaluation import evaluate
+from dataset import GTSRB
+from models import CustomResNet50
 
 # Before starting, clear the memory
 torch.cuda.empty_cache()
@@ -23,26 +22,44 @@ torch.cuda.empty_cache()
 # Defining hyperparameters
 batch_size = 256
 learning_rate = 0.001
-epochs = 15
+epochs = 25
 num_classes = 43
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+root_dir = "/kaggle/input/gtsrb-german-traffic-sign"
 
-root_dir = "../Dataset"
-
+mean = torch.tensor([0.3403, 0.3122, 0.3215])
+std = torch.tensor([0.1631, 0.1630, 0.1727])
 # Create Transforms
-transform = transforms.Compose(
+# Define your transformations for data augmentation
+train_transforms = transforms.Compose(
     [
-        transforms.Resize((64, 64)),
-        transforms.ToTensor(),
-        # transforms.Normalize((0.3403, 0.3121, 0.3214), (0.2724, 0.2608, 0.2669)),
+        transforms.Resize((64, 64)),  # Resizing the image to 64x64
+        transforms.RandomHorizontalFlip(),  # Randomly flipping the image horizontally
+        transforms.RandomRotation(
+            10
+        ),  # Randomly rotating the image by up to 10 degrees
+        transforms.ColorJitter(
+            brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+        ),  # Randomly altering the image's brightness, contrast, saturation, and hue
+        transforms.ToTensor(),  # Convert the image to a PyTorch tensor
+        transforms.Normalize(mean=mean, std=std),  # Normalizing the tensor
+    ]
+)
+
+# For validation and testing, you usually apply only minimal transformations (e.g., resizing and normalization).
+test_transforms = transforms.Compose(
+    [
+        transforms.Resize((64, 64)),  # Resizing the image to 64x64
+        transforms.ToTensor(),  # Convert the image to a PyTorch tensor
+        transforms.Normalize(mean=mean, std=std),  # Normalizing the tensor
     ]
 )
 
 # Create Datasets
-train_val_dataset = dataset.GTSRB(root_dir=root_dir, train=True, transform=transform)
-testset = dataset.GTSRB(root_dir=root_dir, train=False, transform=transform)
+train_val_dataset = GTSRB(root_dir=root_dir, train=True, transform=train_transforms)
+testset = GTSRB(root_dir=root_dir, train=False, transform=test_transforms)
 
 # Define the sizes of the training and validation subsets
 train_size = int(0.8 * len(train_val_dataset))  # 80% of the dataset for training
@@ -56,13 +73,22 @@ train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size, shuffle=False)
 
 # Load Datasets
-testloader = DataLoader(testset, batch_size, shuffle=False, num_workers=2)
+test_loader = DataLoader(testset, batch_size, shuffle=False, num_workers=2)
 
 # Initialize the model
-model = CustomResNet50(num_classes)
+weights_path = (
+    "/kaggle/input/resnet50/resnet50_imagenet_v1.pth"  # Adjust the path as necessary
+)
+
+model = CustomResNet50(num_classes, weights_path=weights_path)
 
 # Define optimizer and criterion functions
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+# optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Initialize the scheduler
+scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
+
 criterion = nn.CrossEntropyLoss()
 
 # If CUDA is available, convert model and loss to cuda variables
@@ -76,6 +102,9 @@ train_acc_list = [0] * epochs
 val_loss_list = [0] * epochs
 val_acc_list = [0] * epochs
 
+best_val_loss = float("inf")
+
+
 for epoch in range(epochs):
     print("Epoch-%d: " % (epoch))
 
@@ -84,7 +113,7 @@ for epoch in range(epochs):
     train_end_time = time.monotonic()
 
     val_start_time = time.monotonic()
-    val_loss, val_acc = evaluate(model, val_loader, optimizer, criterion)
+    val_loss, val_acc = evaluate(model, val_loader, optimizer, criterion, device)
     val_end_time = time.monotonic()
 
     train_loss_list[epoch] = train_loss
@@ -102,21 +131,17 @@ for epoch in range(epochs):
     )
     print("")
 
+    scheduler.step()
 
-# Saving the model
-
-# Create folder to save model
-Model_folder = "./Models"
-if not os.path.isdir(Model_folder):
-    os.mkdir(Model_folder)
-
-PATH_TO_MODEL = Model_folder + "/pytorch_classification_resnet50.pth"
-if os.path.exists(PATH_TO_MODEL):
-    os.remove(PATH_TO_MODEL)
-torch.save(model.state_dict(), PATH_TO_MODEL)
-
-print("Model saved at %s" % (PATH_TO_MODEL))
-
+    # Check if the current validation loss is the best
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        # Save the model if it has the best validation loss so far
+        best_model_path = "./best_pytorch_classification_resnet50.pth"
+        torch.save(model.state_dict(), best_model_path)
+        print(
+            f"Epoch {epoch}: New best model saved at {best_model_path} with validation loss {val_loss:.4f}"
+        )
 
 # Plot loss and accuracies for training and validation data
 _, axs = plt.subplots(1, 2, figsize=(15, 5))
@@ -138,41 +163,71 @@ axs[1].set_ylabel("Accuracy")
 legend = axs[1].legend(loc="center right", shadow=True)
 
 
+# evaluate for the testdata
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+root_dir = "/kaggle/input/gtsrb-german-traffic-sign"
+
+batch_size = 256
+
+# Create Transforms
+transform = transforms.Compose(
+    [
+        transforms.Resize((64, 64)),
+        transforms.ToTensor(),
+        # transforms.Normalize((0.3403, 0.3121, 0.3214), (0.2724, 0.2608, 0.2669)),
+    ]
+)
+
+num_classes = 43
+testset = GTSRB(root_dir=root_dir, train=False, transform=transform)
+test_loader = DataLoader(testset, batch_size, shuffle=False, num_workers=2)
+
 # print(os.listdir('/kaggle/input/gtsrb-german-traffic-sign'))
-Model_path = "/kaggle/working/pytorch_classification_resnet50.pth"
+Model_path = best_model_path
 model = CustomResNet50(num_classes)
 model.load_state_dict(torch.load(Model_path))
 model = model.to(device)
 
-# Perform classification
 
-y_pred_list = []
+# Generating labels of classes
+num_classes = 43
+
+num = range(num_classes)
+labels = []
+for i in num:
+    labels.append(str(i))
+labels = sorted(labels)
+for i in num:
+    labels[i] = int(labels[i])
+print("List of labels : ")
+print("Actual labels \t--> Class in PyTorch")
+for i in num:
+    print("\t%d \t--> \t%d" % (labels[i], i))
+
+# Read the image labels from the csv file
+# Note: The labels provided are all numbers, whereas the labels assigned by PyTorch dataloader are strings
+
+df = pd.read_csv("/kaggle/input/gtsrb-german-traffic-sign/Test.csv")
+numExamples = len(df)
+labels_list = list(df.ClassId)
+
 corr_classified = 0
+total_images = 0
 
 with torch.no_grad():
     model.eval()
 
-    i = 0
+    for images, labels in test_loader:  # Assuming test_loader has the correct labels
+        images = images.to(device)
+        labels = labels.to(device)
 
-    for image, _ in test_loader:
-        image = image.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
 
-        y_test_pred = model(image)
-
-        y_pred_softmax = torch.log_softmax(y_test_pred[0], dim=1)
-        _, y_pred_tags = torch.max(y_pred_softmax, dim=1)
-        y_pred_tags = y_pred_tags.cpu().numpy()
-
-        y_pred = y_pred_tags[0]
-        y_pred = labels[y_pred]
-
-        y_pred_list.append(y_pred)
-
-        if labels_list[i] == y_pred:
-            corr_classified += 1
-
-        i += 1
+        total_images += labels.size(0)
+        corr_classified += (predicted == labels).sum().item()
 
 print("Number of correctly classified images = %d" % corr_classified)
-print("Number of incorrectly classified images = %d" % (numExamples - corr_classified))
-print("Final accuracy = %f" % (corr_classified / numExamples))
+print("Number of incorrectly classified images = %d" % (total_images - corr_classified))
+print("Final accuracy = %f" % (corr_classified / total_images))

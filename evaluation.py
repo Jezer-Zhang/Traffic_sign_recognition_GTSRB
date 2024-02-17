@@ -1,10 +1,10 @@
 import torch
-
+from train import calculate_accuracy
 
 # Function to perform evaluation on the trained model
 
 
-def evaluate(model, loader, opt, criterion):
+def evaluate(model, loader, opt, criterion, device):
     epoch_loss = 0
     epoch_acc = 0
 
@@ -13,11 +13,11 @@ def evaluate(model, loader, opt, criterion):
 
     with torch.no_grad():
         for images, labels in loader:
-            images = images.cuda()
-            labels = labels.cuda()
+            images = images.to(device)
+            labels = labels.to(device)
 
             # Run predictions
-            output, _ = model(images)
+            output = model(images)
             loss = criterion(output, labels)
 
             # Calculate accuracy
