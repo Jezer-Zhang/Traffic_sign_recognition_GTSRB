@@ -190,28 +190,6 @@ model.load_state_dict(torch.load(Model_path))
 model = model.to(device)
 
 
-# Generating labels of classes
-num_classes = 43
-
-num = range(num_classes)
-labels = []
-for i in num:
-    labels.append(str(i))
-labels = sorted(labels)
-for i in num:
-    labels[i] = int(labels[i])
-print("List of labels : ")
-print("Actual labels \t--> Class in PyTorch")
-for i in num:
-    print("\t%d \t--> \t%d" % (labels[i], i))
-
-# Read the image labels from the csv file
-# Note: The labels provided are all numbers, whereas the labels assigned by PyTorch dataloader are strings
-
-df = pd.read_csv("/kaggle/input/gtsrb-german-traffic-sign/Test.csv")
-numExamples = len(df)
-labels_list = list(df.ClassId)
-
 corr_classified = 0
 total_images = 0
 
